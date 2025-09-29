@@ -1,0 +1,5 @@
+Checks: 'google-*'
+WarningsAsErrors: ''
+HeaderFilterRegex: ''
+AnalyzeTemporaryDtors: false
+FormatStyle: google
