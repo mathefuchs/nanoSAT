@@ -84,8 +84,6 @@ class Solver {
   std::uint32_t trail_propagation_head;
   /// Current variable assignments (variables can be unset, false, or true)
   std::vector<clauses::VariableValue> variable_values;
-  /// Heuristic measure of the activity of a variable
-  std::vector<double> variable_activity;
   /// Stores the preferred polarity of a variable (phase saving)
   std::vector<bool> variable_polarity;
   /// Stores metadata for all variables
@@ -96,8 +94,6 @@ class Solver {
   std::vector<clauses::Variable> unset_variables;
 
   // -- Solver state
-  /// Amount to change variable activity with
-  double variable_activity_increment;
   /// Amount to change clause activity with
   double clause_activity_increment;
   /// Maximum number of learned clauses allowed
@@ -120,12 +116,10 @@ class Solver {
         trail_separators(),
         trail_propagation_head(0),
         variable_values(),
-        variable_activity(),
         variable_polarity(),
         variable_metadata(),
         literals_watched_by(),
         unset_variables(),
-        variable_activity_increment(1.0),
         clause_activity_increment(1.0),
         max_learned_clauses(0.0),
         learned_size_adjust_on_conflict(100.0),
@@ -152,7 +146,6 @@ class Solver {
   void createVariables(std::uint32_t num_variables) {
     stats.num_variables = num_variables;
     variable_values.resize(numVariables());
-    variable_activity.resize(numVariables(), 0.0);
     variable_polarity.resize(numVariables(), false);
     variable_metadata.resize(numVariables(), {{}, 0});
     trail.reserve(numVariables() + 1);
@@ -323,8 +316,7 @@ class Solver {
           assignLiteral(learned_clause[0], clause_ref);
         }
 
-        // Decay variable and clause activities
-        variable_activity_increment *= 1 / options::VARIABLE_ACTIVITY_DECAY;
+        // Decay clause activities
         clause_activity_increment *= 1 / options::CLAUSE_ACTIVITY_DECAY;
 
         // Update maximum number of learned clauses
@@ -425,7 +417,6 @@ class Solver {
         // Check unseen variables in clause
         if (variable_seen[conflict_literal.var()] == VariableStatus::UNSET &&
             variable_metadata[conflict_literal.var()].decision_level > 0) {
-          increaseVariableActivity(conflict_literal.var());
           variable_seen[conflict_literal.var()] = VariableStatus::IS_SOURCE;
 
           if (variable_metadata[conflict_literal.var()].decision_level >=
@@ -605,29 +596,23 @@ class Solver {
 
   /// Pick next literal to branch on
   std::optional<clauses::Literal> pickBranchLiteral() {
-    std::optional<clauses::Variable> next_var = {};
-
-    // Activity based decision
-    while (!next_var.has_value() || !variable_values[*next_var].isUnset()) {
-      if (unset_variables.empty()) {
-        // No variables left to decide on
-        return {};
-      }
-
-      // Remove min-activity variable
-      auto min_activity_iter =
-          std::min_element(unset_variables.begin(), unset_variables.end(),
-                           [this](auto x, auto y) {
-                             return variable_activity[x] < variable_activity[y];
-                           });
-      next_var = *min_activity_iter;
-      auto idx = std::distance(unset_variables.begin(), min_activity_iter);
+    // Random decision
+    while (!unset_variables.empty()) {
+      // Select random unset variable
+      std::uniform_int_distribution<std::size_t> dist(
+          0, unset_variables.size() - 1);
+      auto idx = dist(random_gen);
+      auto var = unset_variables[idx];
       unset_variables[idx] = unset_variables.back();
       unset_variables.pop_back();
+
+      // Check whether variable is unset
+      if (variable_values[var].isUnset()) {
+        return {{var, variable_polarity[var]}};
+      }
     }
 
-    // Choose polarity based on preferred polarity
-    return {{*next_var, variable_polarity[*next_var]}};
+    return {};
   }
 
   /// Accesses an original or learned clause
@@ -668,19 +653,6 @@ class Solver {
         learned_clauses.activity({i, true}) *= 1e-20;
       }
       clause_activity_increment *= 1e-20;
-    }
-  }
-
-  /// Increase the variable activity of an analyzed variable
-  void increaseVariableActivity(clauses::Variable var) {
-    variable_activity[var] += variable_activity_increment;
-
-    // Rescale
-    if (variable_activity[var] > 1e100) {
-      for (auto& act : variable_activity) {
-        act *= 1e-100;
-      }
-      variable_activity_increment *= 1e-100;
     }
   }
 

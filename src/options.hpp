@@ -2,8 +2,6 @@
 
 namespace ns::options {
 
-/// Variable activity decay
-constexpr double VARIABLE_ACTIVITY_DECAY = 0.95;
 /// Clause activity decay
 constexpr double CLAUSE_ACTIVITY_DECAY = 0.999;
 /// Fraction of learned clauses compared to original clauses
